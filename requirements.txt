@@ -1,5 +1,6 @@
 flask==2.1.2
 flask-compress==1.14
+Werkzeug==2.2.2
 google-auth==2.29.0
 gspread==6.0.2
 gunicorn==23.0.0
