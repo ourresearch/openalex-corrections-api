@@ -26,7 +26,12 @@ logger = logging.getLogger("corrections-api")
 # Set up CORS
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
 if ENVIRONMENT == "production":
-    CORS(app, origins=["https://unpaywall.org"])
+    CORS(
+        app,
+        origins=["https://unpaywall.org"],
+        allow_headers=["Content-Type"],
+        methods=["GET", "POST", "OPTIONS"]
+    )
 else:
     CORS(app)
 
