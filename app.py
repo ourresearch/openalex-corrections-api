@@ -25,11 +25,3 @@ for library in libraries_to_mum:
 # Flask app setup
 app = Flask(__name__)
 Compress(app)
-
-# Example: load config from environment variables
-GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")
-GOOGLE_CREDS_JSON = os.getenv("GOOGLE_CREDS_JSON", "")
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port)
