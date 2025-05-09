@@ -1,6 +1,7 @@
 import logging
 from flask import request, jsonify
 from app import app
+import os
 
 logger = logging.getLogger("corrections-api")
 
@@ -25,3 +26,7 @@ def corrections():
     logger.info("Would send to Google Sheets here.")
 
     return jsonify({"status": "success"}), 201
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5106))
+    app.run(host="0.0.0.0", port=port)
