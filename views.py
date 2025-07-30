@@ -28,12 +28,14 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
 if ENVIRONMENT == "production":
     CORS(
         app,
-        origins=["https://unpaywall.org"],
+        origins=["https://unpaywall.org", "https://openalex.org"],
         allow_headers=["Content-Type"],
         methods=["GET", "POST", "OPTIONS"]
     )
 else:
     CORS(app)
+
+
 
 @app.route("/corrections", methods=["POST"])
 def corrections():
@@ -72,6 +74,52 @@ def corrections():
         return jsonify({"error": "Invalid type provided"}), 400
 
     return jsonify({"status": "success"}), 201
+
+
+@app.route("/pending", methods=["GET"])
+def pending():
+    return jsonify({
+        "journals": get_pending_ids(journals_sheet),
+        "works": get_pending_ids(works_sheet)
+    })
+
+
+def get_pending_ids(sheet):
+    """
+    Get values from the fifth column of journal sheet rows where:
+    - Second column does not equal "yes"
+    - First column does not equal "no"
+    
+    Returns:
+        list: Values from the fifth column of matching rows
+    """
+    try:
+        # Get all values from the sheet
+        all_values = sheet.get_all_values()
+        
+        # Skip header row if it exists (assuming first row is headers)
+        data_rows = all_values[1:] if all_values else []
+        
+        filtered_values = []
+        
+        for row in data_rows:
+            # Ensure row has at least 5 columns
+            if len(row) >= 5:
+                # Get values from first, second, and fifth columns (0-indexed)
+                first_col = row[0].strip().lower() if row[0] else ""
+                second_col = row[1].strip().lower() if row[1] else ""
+                fifth_col = row[4] if row[4] else ""
+                
+                # Check conditions: second column != "yes" AND first column != "no"
+                if second_col != "yes" and first_col != "no":
+                    filtered_values.append(fifth_col)
+        
+        return filtered_values
+        
+    except Exception as e:
+        logger.error(f"Error filtering journal sheet: {str(e)}")
+        return []
+
 
 @app.route("/", methods=["GET"])
 def base_endpoint():
