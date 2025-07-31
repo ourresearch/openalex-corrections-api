@@ -65,6 +65,10 @@ def corrections():
         row.append(data.get("Previous is_oa", ""))
         row.append(data.get("Previous oa_date", ""))
         row.append(data.get("email", ""))
+
+        if data.get("Approved", False):
+            row[0] = "yes"
+
         print("Posting to Journals:")
         print(row)
         journals_sheet.append_row(row, value_input_option="USER_ENTERED")
