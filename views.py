@@ -1,14 +1,19 @@
 import logging
 import os
 import json
+import requests
 import gspread
 from datetime import datetime
 from flask import request, jsonify
-from app import app
+from app import app, db
 from flask_cors import CORS
 import os
 from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import AuthorizedSession
+
+from models import Curation
+from emailer import send_moderation_email
+
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
@@ -78,6 +83,195 @@ def corrections():
         return jsonify({"error": "Invalid type provided"}), 400
 
     return jsonify({"status": "success"}), 201
+
+
+@app.route("/v2/corrections", methods=["POST"])
+def v2_corrections():
+    data = request.get_json()
+    if not data:
+        logger.warning("No JSON data provided in request")
+        return jsonify({"error": "No data provided"}), 400
+
+    # Validate required fields (must be present and have values)
+    required_fields = ["entity", "entity_id", "property", "email"]
+    missing_fields = []
+    
+    for field in required_fields:
+        if not data.get(field):
+            missing_fields.append(field)
+    
+    # Check that property_value is present (but can be None)
+    if "property_value" not in data:
+        missing_fields.append("property_value")
+    
+    if missing_fields:
+        logger.warning(f"Missing required fields: {missing_fields}")
+        return jsonify({"error": f"Missing required fields: {', '.join(missing_fields)}"}), 400
+
+    property_value = data.get("property_value", None)
+    property_value = property_value if property_value == "" else property_value
+    curation = Curation(
+        entity=data.get("entity"),
+        entity_id=data.get("entity_id"),
+        property=data.get("property"),
+        property_value=property_value,
+        email=data.get("email"),
+        approved=data.get("approved", None),
+        submitted_date=datetime.utcnow(),
+    )
+    db.session.add(curation)
+    db.session.commit()
+
+    return jsonify({"status": "success"}), 201
+
+
+@app.route("/v2/corrections", methods=["GET"])
+def v2_corrections_get():
+    from sqlalchemy import desc, asc
+    
+    # Pagination - support both offset and page parameters
+    per_page = min(request.args.get('per_page', 20, type=int), 100)
+    offset_param = request.args.get('offset', type=int)
+    page = request.args.get('page', 1, type=int)
+    
+    # Build query with filters
+    query = Curation.query
+    
+    # Apply filters dynamically
+    filter_fields = ['entity', 'entity_id', 'property', 'email']
+    for field in filter_fields:
+        if value := request.args.get(field):
+            query = query.filter(getattr(Curation, field) == value)
+    
+    # Boolean filters
+    for field in ['approved', 'ingested']:
+        if value := request.args.get(field):
+            column = getattr(Curation, field)
+            if value.lower() == 'null':
+                query = query.filter(column.is_(None))
+            else:
+                query = query.filter(column == (value.lower() == 'true'))
+    
+    # Sorting
+    sort_by = request.args.get('sort_by', 'submitted_date')
+    sort_order = request.args.get('sort_order', 'desc')
+    if hasattr(Curation, sort_by):
+        sort_func = desc if sort_order.lower() == 'desc' else asc
+        query = query.order_by(sort_func(getattr(Curation, sort_by)))
+    
+    if offset_param is not None:
+        # Use offset/limit directly
+        total = query.count()
+        results = query.offset(offset_param).limit(per_page).all()
+        
+        return jsonify({
+            'results': add_previous_values([c.to_dict() for c in results]),
+            'pagination': {
+                'offset': offset_param,
+                'per_page': per_page,
+                'total': total,
+                'has_more': (offset_param + per_page) < total
+            }
+        })
+    else:
+        # Use page-based pagination
+        paginated = query.paginate(page=page, per_page=per_page, error_out=False)
+        
+        return jsonify({
+            'results': add_previous_values([c.to_dict() for c in paginated.items]),
+            'pagination': {
+                'page': page, 'per_page': per_page, 'total': paginated.total,
+                'pages': paginated.pages, 'has_next': paginated.has_next, 'has_prev': paginated.has_prev
+            }
+        })
+
+
+def add_previous_values(curations):
+    work_ids = [c["entity_id"] for c in curations if c["entity"] == "works" and not c["ingested"]]
+    journal_ids = [c["entity_id"] for c in curations if c["entity"] == "journals" and not c["ingested"]]
+
+    works_data = {}
+    journals_data = {}
+    
+    if len(work_ids) > 0:
+        works_data = get_openalex_data("works", work_ids)
+    
+    if len(journal_ids) > 0:
+        journals_data = get_openalex_data("journals", journal_ids)
+
+    for curation in curations:
+        if curation["entity"] == "works" and curation["entity_id"] in works_data:
+            work_data = works_data[curation["entity_id"]]
+            curation["apiData"] = work_data
+            if curation["property"] == "pdf_url":
+                curation["previous_value"] = work_data.get("primary_location", {}).get("pdf_url", None)
+            elif curation["property"] == "html_url":
+                curation["previous_value"] = work_data.get("primary_location", {}).get("html_url", None)
+            elif curation["property"] == "license":
+                curation["previous_value"] = work_data.get("primary_location", {}).get("license", None)
+        
+        elif curation["entity"] == "journals" and curation["entity_id"] in journals_data:
+            journal_data = journals_data[curation["entity_id"]]
+            curation["apiData"] = journal_data
+
+    return curations        
+
+
+def get_openalex_data(entity, ids):
+    url = f"https://api.openalex.org/{entity}?filter=ids.openalex:" + "|".join(ids) # TEMP while API isn't working+ "&data-version=2"
+    print("URL:", url, flush=True)
+    response = requests.get(url)
+    data = response.json()
+    return {response["id"].replace("https://openalex.org/", ""): response for response in data["results"]}
+        
+
+@app.route("/v2/corrections/<id>", methods=["POST"])
+def v2_corrections_update(id):
+    data = request.get_json()
+    if not data:
+        logger.warning("No JSON data provided in request")
+        return jsonify({"error": "No data provided"}), 400
+
+    curation = Curation.query.get(id)
+    if not curation:
+        logger.warning(f"Curation with id {id} not found")
+        return jsonify({"error": "Curation not found"}), 404
+
+    if "approved" in data:
+        new_approved = data.get("approved", None)
+        old_approved = curation.approved
+        curation.approved = new_approved
+        curation.approved_date = datetime.utcnow()
+        db.session.commit()
+
+        if old_approved is None and new_approved is not None:
+            send_moderation_email(curation)
+
+    return jsonify({"status": "success"}), 200
+
+
+
+@app.route("/v2/pending", methods=["GET"])
+def v2_pending():
+    from sqlalchemy import or_, and_
+    
+    pending_curations = Curation.query.filter(
+        or_(
+            Curation.approved.is_(None),  # Not yet approved
+            and_(
+                Curation.approved == True,  # Approved but not ingested
+                or_(
+                    Curation.ingested.is_(None),
+                    Curation.ingested == False
+                )
+            )
+        )
+    ).all()
+    
+    entity_ids = list(set([curation.entity_id for curation in pending_curations]))
+    
+    return jsonify(entity_ids)
+
 
 
 @app.route("/pending", methods=["GET"])
