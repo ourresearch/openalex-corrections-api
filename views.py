@@ -218,7 +218,7 @@ def add_previous_values(curations):
 
 
 def get_openalex_data(entity, ids):
-    url = f"https://api.openalex.org/{entity}?filter=ids.openalex:" + "|".join(ids) # TEMP while API isn't working+ "&data-version=2"
+    url = f"https://api.openalex.org/{entity}?filter=ids.openalex:" + "|".join(ids) + "&data-version=2"
     print("URL:", url, flush=True)
     response = requests.get(url)
     data = response.json()
