@@ -93,7 +93,7 @@ def v2_corrections():
         return jsonify({"error": "No data provided"}), 400
 
     # Validate required fields (must be present and have values)
-    required_fields = ["entity", "entity_id", "property", "email"]
+    required_fields = ["entity", "entity_id", "property", "status", "email"]
     missing_fields = []
     
     for field in required_fields:
@@ -111,12 +111,12 @@ def v2_corrections():
     property_value = data.get("property_value", None)
     property_value = property_value if property_value == "" else property_value
     curation = Curation(
+        status=data.get("status"),
         entity=data.get("entity"),
         entity_id=data.get("entity_id"),
         property=data.get("property"),
         property_value=property_value,
         email=data.get("email"),
-        approved=data.get("approved", None),
         submitted_date=datetime.utcnow(),
     )
     db.session.add(curation)
@@ -138,19 +138,10 @@ def v2_corrections_get():
     query = Curation.query
     
     # Apply filters dynamically
-    filter_fields = ['entity', 'entity_id', 'property', 'email']
+    filter_fields = ['status','entity', 'entity_id', 'property', 'email']
     for field in filter_fields:
         if value := request.args.get(field):
             query = query.filter(getattr(Curation, field) == value)
-    
-    # Boolean filters
-    for field in ['approved', 'ingested']:
-        if value := request.args.get(field):
-            column = getattr(Curation, field)
-            if value.lower() == 'null':
-                query = query.filter(column.is_(None))
-            else:
-                query = query.filter(column == (value.lower() == 'true'))
     
     # Sorting
     sort_by = request.args.get('sort_by', 'submitted_date')
@@ -187,8 +178,8 @@ def v2_corrections_get():
 
 
 def add_previous_values(curations):
-    work_ids = [c["entity_id"] for c in curations if c["entity"] == "works" and not c["ingested"]]
-    journal_ids = [c["entity_id"] for c in curations if c["entity"] == "journals" and not c["ingested"]]
+    work_ids = [c["entity_id"] for c in curations if c["entity"] == "works" and not c["status"] == "live"]
+    journal_ids = [c["entity_id"] for c in curations if c["entity"] == "journals" and not c["status"] == "live"]
 
     works_data = {}
     journals_data = {}
@@ -237,14 +228,17 @@ def v2_corrections_update(id):
         logger.warning(f"Curation with id {id} not found")
         return jsonify({"error": "Curation not found"}), 404
 
-    if "approved" in data:
-        new_approved = data.get("approved", None)
-        old_approved = curation.approved
-        curation.approved = new_approved
-        curation.approved_date = datetime.utcnow()
+    if "status" in data:
+        new_status = data.get("status", None)
+        if new_status not in ["needs-moderation", "approved", "denied"]:
+            return jsonify({"error": "Invalid status"}), 400
+
+        old_status = curation.status
+        curation.status = new_status
+        curation.moderated_date = datetime.utcnow()
         db.session.commit()
 
-        if old_approved is None and new_approved is not None:
+        if old_status == "needs-moderation" and new_status in ["approved", "denied"]:
             send_moderation_email(curation)
 
     return jsonify({"status": "success"}), 200
@@ -253,22 +247,16 @@ def v2_corrections_update(id):
 
 @app.route("/v2/pending", methods=["GET"])
 def v2_pending():
-    from sqlalchemy import or_, and_
+    from sqlalchemy import or_
     
     pending_curations = Curation.query.filter(
         or_(
-            Curation.approved.is_(None),  # Not yet approved
-            and_(
-                Curation.approved == True,  # Approved but not ingested
-                or_(
-                    Curation.ingested.is_(None),
-                    Curation.ingested == False
-                )
-            )
+            Curation.status == "needs-moderation",
+            Curation.status == "approved"
         )
     ).all()
     
-    entity_ids = list(set([curation.entity_id for curation in pending_curations]))
+    entity_ids = list(set([f"{curation.entity_id}|{curation.property}" for curation in pending_curations]))
     
     return jsonify(entity_ids)
 
