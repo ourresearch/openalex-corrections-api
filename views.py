@@ -3,7 +3,7 @@ import os
 import json
 import requests
 import gspread
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import request, jsonify
 from app import app, db
 from flask_cors import CORS
@@ -86,14 +86,14 @@ def corrections():
 
 
 @app.route("/v2/corrections", methods=["POST"])
-def v2_corrections():
+def v2_corrections_post():
     data = request.get_json()
     if not data:
         logger.warning("No JSON data provided in request")
         return jsonify({"error": "No data provided"}), 400
 
     # Validate required fields (must be present and have values)
-    required_fields = ["entity", "entity_id", "property", "status", "email"]
+    required_fields = ["entity", "entity_id", "property", "status", "submitter_email"]
     missing_fields = []
     
     for field in required_fields:
@@ -116,9 +116,12 @@ def v2_corrections():
         entity_id=data.get("entity_id"),
         property=data.get("property"),
         property_value=property_value,
-        email=data.get("email"),
-        submitted_date=datetime.utcnow(),
+        submitter_email=data.get("submitter_email"),
+        submitted_date=datetime.now(timezone.utc),
     )
+    if data.get("status") == "approved":
+        curation.moderator_email = data.get("moderator_email", "")
+        curation.moderated_date = datetime.now(timezone.utc)
     db.session.add(curation)
     db.session.commit()
 
@@ -179,16 +182,16 @@ def v2_corrections_get():
 
 def add_previous_values(curations):
     work_ids = [c["entity_id"] for c in curations if c["entity"] == "works" and not c["status"] == "live"]
-    journal_ids = [c["entity_id"] for c in curations if c["entity"] == "journals" and not c["status"] == "live"]
+    source_ids = [c["entity_id"] for c in curations if c["entity"] == "sources" and not c["status"] == "live"]
 
     works_data = {}
-    journals_data = {}
+    sources_data = {}
     
     if len(work_ids) > 0:
         works_data = get_openalex_data("works", work_ids)
     
-    if len(journal_ids) > 0:
-        journals_data = get_openalex_data("journals", journal_ids)
+    if len(source_ids) > 0:
+        sources_data = get_openalex_data("sources", source_ids)
 
     for curation in curations:
         if curation["entity"] == "works" and curation["entity_id"] in works_data:
@@ -201,11 +204,11 @@ def add_previous_values(curations):
             elif curation["property"] == "license":
                 curation["previous_value"] = work_data.get("primary_location", {}).get("license", None)
         
-        elif curation["entity"] == "journals" and curation["entity_id"] in journals_data:
-            journal_data = journals_data[curation["entity_id"]]
-            curation["apiData"] = journal_data
+        elif curation["entity"] == "sources" and curation["entity_id"] in sources_data:
+            source_data = sources_data[curation["entity_id"]]
+            curation["apiData"] = source_data
             if curation["property"] == "oa_flip_year":
-                curation["previous_value"] = journal_data.get("oa_flip_year", None)
+                curation["previous_value"] = source_data.get("oa_flip_year", None)
 
     return curations        
 
@@ -238,7 +241,7 @@ def v2_corrections_update(id):
         old_status = curation.status
         curation.status = new_status
         curation.moderator_email = data.get("moderator_email", "")
-        curation.moderated_date = datetime.utcnow()
+        curation.moderated_date = datetime.now(timezone.utc)
         db.session.commit()
 
         if old_status == "needs-moderation" and new_status in ["approved", "denied"]:
