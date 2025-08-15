@@ -138,7 +138,7 @@ def v2_corrections_get():
     query = Curation.query
     
     # Apply filters dynamically
-    filter_fields = ['status','entity', 'entity_id', 'property', 'email']
+    filter_fields = ['status','entity', 'entity_id', 'property', 'submitter_email', 'moderator_email']
     for field in filter_fields:
         if value := request.args.get(field):
             query = query.filter(getattr(Curation, field) == value)
@@ -204,6 +204,8 @@ def add_previous_values(curations):
         elif curation["entity"] == "journals" and curation["entity_id"] in journals_data:
             journal_data = journals_data[curation["entity_id"]]
             curation["apiData"] = journal_data
+            if curation["property"] == "oa_flip_year":
+                curation["previous_value"] = journal_data.get("oa_flip_year", None)
 
     return curations        
 
@@ -235,6 +237,7 @@ def v2_corrections_update(id):
 
         old_status = curation.status
         curation.status = new_status
+        curation.moderator_email = data.get("moderator_email", "")
         curation.moderated_date = datetime.utcnow()
         db.session.commit()
 

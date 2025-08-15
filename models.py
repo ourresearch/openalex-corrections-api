@@ -8,7 +8,8 @@ class Curation(db.Model):
   entity_id = db.Column(db.Text)
   property = db.Column(db.Text)
   property_value = db.Column(db.Text)
-  email = db.Column(db.Text)
+  submitter_email = db.Column(db.Text)
+  moderator_email = db.Column(db.Text)
   submitted_date = db.Column(db.DateTime)
   moderated_date = db.Column(db.DateTime)
   live_date = db.Column(db.DateTime)
@@ -21,7 +22,8 @@ class Curation(db.Model):
       "entity_id": self.entity_id,
       "property": self.property,
       "property_value": self.property_value,
-      "email": self.email,
+      "submitter_email": self.submitter_email,
+      "moderator_email": self.moderator_email,
       "submitted_date": self.submitted_date,
       "moderated_date": self.moderated_date,
       "live_date": self.live_date
