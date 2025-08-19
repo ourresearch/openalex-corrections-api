@@ -34,6 +34,8 @@ def check_for_live():
                     
                     # Check if the property value matches what was submitted
                     current_value = api_data.get(curation.property)
+                    current_value = "true" if current_value == True else current_value
+                    current_value = "false" if current_value == False else current_value
                     if str(current_value) == str(curation.property_value):
                         # Update to live status
                         curation.is_live = True
