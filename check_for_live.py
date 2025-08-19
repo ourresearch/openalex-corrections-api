@@ -13,7 +13,7 @@ def check_for_live():
     with app.app_context():
         try:
             # Get all approved curations that aren't live yet
-            waiting_for_live = Curation.query.filter_by(status="approved").all()
+            waiting_for_live = Curation.query.filter_by(status="approved", is_live=False).all()
             
             if not waiting_for_live:
                 print("No approved curations waiting to go live.")
@@ -36,7 +36,7 @@ def check_for_live():
                     current_value = api_data.get(curation.property)
                     if str(current_value) == str(curation.property_value):
                         # Update to live status
-                        curation.status = "live"
+                        curation.is_live = True
                         curation.live_date = datetime.now(timezone.utc)
                         updated_count += 1
                         print(f" Curation {curation.id} for {curation.entity_id} is now live!")

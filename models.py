@@ -12,6 +12,7 @@ class Curation(db.Model):
   moderator_email = db.Column(db.Text)
   submitted_date = db.Column(db.DateTime)
   moderated_date = db.Column(db.DateTime)
+  is_live = db.Column(db.Boolean, nullable=False, default=False)
   live_date = db.Column(db.DateTime)
 
   def to_dict(self):
@@ -26,5 +27,6 @@ class Curation(db.Model):
       "moderator_email": self.moderator_email,
       "submitted_date": self.submitted_date,
       "moderated_date": self.moderated_date,
+      "is_live": self.is_live,
       "live_date": self.live_date
     }
