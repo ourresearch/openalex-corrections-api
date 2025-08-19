@@ -263,7 +263,8 @@ def v2_pending():
         or_(
             Curation.status == "needs-moderation",
             Curation.status == "approved"
-        )
+        ),
+        Curation.is_live == False
     ).all()
     
     entity_ids = list(set([f"{curation.entity_id}|{curation.property}" for curation in pending_curations]))
