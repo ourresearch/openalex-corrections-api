@@ -141,10 +141,14 @@ def v2_corrections_get():
     query = Curation.query
     
     # Apply filters dynamically
-    filter_fields = ['status','entity', 'entity_id', 'property', 'submitter_email', 'moderator_email']
+    filter_fields = ['status','entity', 'entity_id', 'property', 'submitter_email', 'moderator_email', 'is_live']
     for field in filter_fields:
         if value := request.args.get(field):
-            query = query.filter(getattr(Curation, field) == value)
+            if field == 'is_live':
+                is_live_value = value.lower() in ('true', '1', 'yes')
+                query = query.filter(Curation.is_live == is_live_value)
+            else:
+                query = query.filter(getattr(Curation, field) == value)
     
     # Sorting
     sort_by = request.args.get('sort_by', 'submitted_date')
