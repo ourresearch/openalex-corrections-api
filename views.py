@@ -93,16 +93,18 @@ def v2_corrections_post():
         return jsonify({"error": "No data provided"}), 400
 
     # Validate required fields (must be present and have values)
-    required_fields = ["entity", "entity_id", "property", "status", "submitter_email"]
+    required_fields = ["entity", "entity_id", "status", "submitter_email"]
     missing_fields = []
     
     for field in required_fields:
         if not data.get(field):
             missing_fields.append(field)
     
-    # Check that property_value is present (but can be None)
-    if "property_value" not in data:
-        missing_fields.append("property_value")
+    # Check required fields that can be null
+    nullable_required_fields = ["property_value", "property"]
+    for field in nullable_required_fields:
+        if not field in data:
+            missing_fields.append(field)
     
     if missing_fields:
         logger.warning(f"Missing required fields: {missing_fields}")
@@ -116,6 +118,7 @@ def v2_corrections_post():
         entity_id=data.get("entity_id"),
         property=data.get("property"),
         property_value=property_value,
+        create_new=data.get("create_new", False),
         submitter_email=data.get("submitter_email"),
         submitted_date=datetime.now(timezone.utc),
     )
@@ -185,28 +188,28 @@ def v2_corrections_get():
 
 
 def add_previous_values(curations):
-    work_ids = [c["entity_id"] for c in curations if c["entity"] == "works" and not c["status"] == "live"]
+    location_ids = [c["entity_id"] for c in curations if c["entity"] == "locations" and not c["status"] == "live"]
     source_ids = [c["entity_id"] for c in curations if c["entity"] == "sources" and not c["status"] == "live"]
 
-    works_data = {}
+    locations_data = {}
     sources_data = {}
     
-    if len(work_ids) > 0:
-        works_data = get_openalex_data("works", work_ids)
+    if len(location_ids) > 0:
+        locations_data = get_openalex_data("locations", location_ids)
     
     if len(source_ids) > 0:
         sources_data = get_openalex_data("sources", source_ids)
 
     for curation in curations:
-        if curation["entity"] == "works" and curation["entity_id"] in works_data:
-            work_data = works_data[curation["entity_id"]]
-            curation["apiData"] = work_data
+        if curation["entity"] == "locations" and curation["entity_id"] in locations_data:
+            location_data = locations_data[curation["entity_id"]]
+            curation["apiData"] = location_data
             if curation["property"] == "pdf_url":
-                curation["previous_value"] = work_data.get("primary_location", {}).get("pdf_url", None)
-            elif curation["property"] == "html_url":
-                curation["previous_value"] = work_data.get("primary_location", {}).get("html_url", None)
+                curation["previous_value"] = location_data.get("pdf_url", None)
+            elif curation["property"] == "landing_page_url":
+                curation["previous_value"] = location_data.get("landing_page_url", None)
             elif curation["property"] == "license":
-                curation["previous_value"] = work_data.get("primary_location", {}).get("license", None)
+                curation["previous_value"] = location_data.get("license", None)
         
         elif curation["entity"] == "sources" and curation["entity_id"] in sources_data:
             source_data = sources_data[curation["entity_id"]]
@@ -218,12 +221,16 @@ def add_previous_values(curations):
 
 
 def get_openalex_data(entity, ids):
-    url = f"https://api.openalex.org/{entity}?filter=ids.openalex:" + "|".join(ids) + "&data-version=2"
-    print("URL:", url, flush=True)
-    response = requests.get(url)
-    data = response.json()
-    return {response["id"].replace("https://openalex.org/", ""): response for response in data["results"]}
-        
+    filterId = "id:" if entity == "locations" else "ids.openalex:"
+    try: 
+        url = f"https://api.openalex.org/{entity}?filter={filterId}" + "|".join(ids) + "&data-version=2"
+        print("URL:", url, flush=True)
+        response = requests.get(url)
+        data = response.json()
+        return {response["id"].replace("https://openalex.org/", ""): response for response in data["results"]}
+    except Exception as e:
+        logger.error(f"Error getting OpenAlex data: {e}")
+        return {} 
 
 @app.route("/v2/corrections/<id>", methods=["POST"])
 def v2_corrections_update(id):
