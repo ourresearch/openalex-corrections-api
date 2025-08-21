@@ -32,11 +32,20 @@ def check_for_live():
                     response.raise_for_status()
                     api_data = response.json()
                     
-                    # Check if the property value matches what was submitted
-                    current_value = api_data.get(curation.property)
-                    current_value = "true" if current_value == True else current_value
-                    current_value = "false" if current_value == False else current_value
-                    if str(current_value) == str(curation.property_value):
+                    if curation.create_new:
+                        # Check if new entity matches all submitted data
+                        new_data = JSON.parse(curation.property_value)
+                        is_live = all(api_data.get(key) == value for key, value in new_data.items())
+                        
+                    else:
+                        # Check if the property value matches what was submitted
+                        current_value = api_data.get(curation.property)
+                        current_value = "true" if current_value == True else current_value
+                        current_value = "false" if current_value == False else current_value
+                        is_live = str(current_value) == str(curation.property_value)
+                    
+                    
+                    if is_live:
                         # Update to live status
                         curation.is_live = True
                         curation.live_date = datetime.now(timezone.utc)
