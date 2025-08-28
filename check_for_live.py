@@ -2,7 +2,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import requests
+import json
 from datetime import datetime, timezone
+
 from app import app, db
 from models import Curation
 
@@ -34,7 +36,7 @@ def check_for_live():
                     
                     if curation.create_new:
                         # Check if new entity matches all submitted data
-                        new_data = JSON.parse(curation.property_value)
+                        new_data = json.loads(curation.property_value)
                         is_live = all(api_data.get(key) == value for key, value in new_data.items())
                         
                     else:
