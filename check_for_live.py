@@ -34,11 +34,24 @@ def check_for_live():
                     response.raise_for_status()
                     api_data = response.json()
                     
-                    if curation.create_new:
-                        # Check if new entity matches all submitted data
+                    if curation.entity == "locations":
+                        # For locations, check against location object on Work API
+                        work_url = api_data["work_id"].replace("://", "://api.") + "?data-version=2"
+                        work_response = requests.get(work_url, timeout=10)
+                        response.raise_for_status()
+                        work_data = work_response.json()
+                        location = next((loc for loc in work_data["locations"] if loc["id"] == curation.entity_id), None)
+
+                        api_data = location
+
+                    if not api_data:
+                        is_live = False
+
+                    elif curation.create_new:
+                        # Check all fields in JSON
                         new_data = json.loads(curation.property_value)
                         is_live = all(api_data.get(key) == value for key, value in new_data.items())
-                        
+                       
                     else:
                         # Check if the property value matches what was submitted
                         current_value = api_data.get(curation.property)
@@ -46,7 +59,7 @@ def check_for_live():
                         current_value = "false" if current_value == False else current_value
                         is_live = str(current_value) == str(curation.property_value)
                     
-                    
+
                     if is_live:
                         # Update to live status
                         curation.is_live = True
