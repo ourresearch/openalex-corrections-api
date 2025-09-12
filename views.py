@@ -188,8 +188,8 @@ def v2_corrections_get():
 
 
 def add_previous_values(curations):
-    location_ids = [c["entity_id"] for c in curations if c["entity"] == "locations" and not c["status"] == "live"]
-    source_ids = [c["entity_id"] for c in curations if c["entity"] == "sources" and not c["status"] == "live"]
+    location_ids = [c["entity_id"] for c in curations if c["entity"] == "locations" and not c["is_live"]]
+    source_ids = [c["entity_id"] for c in curations if c["entity"] == "sources" and not c["is_live"]]
 
     locations_data = {}
     sources_data = {}
@@ -200,22 +200,14 @@ def add_previous_values(curations):
     if len(source_ids) > 0:
         sources_data = get_openalex_data("sources", source_ids)
 
+    api_data = {**locations_data, **sources_data}
+    
     for curation in curations:
-        if curation["entity"] == "locations" and curation["entity_id"] in locations_data:
-            location_data = locations_data[curation["entity_id"]]
-            curation["apiData"] = location_data
-            if curation["property"] == "pdf_url":
-                curation["previous_value"] = location_data.get("pdf_url", None)
-            elif curation["property"] == "landing_page_url":
-                curation["previous_value"] = location_data.get("landing_page_url", None)
-            elif curation["property"] == "license":
-                curation["previous_value"] = location_data.get("license", None)
-        
-        elif curation["entity"] == "sources" and curation["entity_id"] in sources_data:
-            source_data = sources_data[curation["entity_id"]]
-            curation["apiData"] = source_data
-            if curation["property"] == "oa_flip_year":
-                curation["previous_value"] = source_data.get("oa_flip_year", None)
+        if curation["entity_id"] in api_data:
+            entity_data = api_data[curation["entity_id"]]
+            curation["apiData"] = entity_data
+            if curation["property"] is not None:
+                curation["previous_value"] = entity_data.get(curation["property"], None)
 
     return curations        
 
