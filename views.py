@@ -93,7 +93,7 @@ def v2_corrections_post():
         return jsonify({"error": "No data provided"}), 400
 
     # Validate required fields (must be present and have values)
-    required_fields = ["entity", "entity_id", "status", "submitter_email"]
+    required_fields = ["entity", "entity_id", "submitter_email"]
     missing_fields = []
     
     for field in required_fields:
@@ -113,7 +113,7 @@ def v2_corrections_post():
     property_value = data.get("property_value", None)
     property_value = property_value if property_value == "" else property_value
     curation = Curation(
-        status=data.get("status"),
+        status=data.get("status", "approved"),
         entity=data.get("entity"),
         entity_id=data.get("entity_id"),
         property=data.get("property"),
