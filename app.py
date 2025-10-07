@@ -5,6 +5,7 @@ import warnings
 
 from flask import Flask, request, jsonify
 from flask_compress import Compress
+from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.pool import NullPool
 
@@ -38,3 +39,17 @@ class NullPoolSQLAlchemy(SQLAlchemy):
 
 db = NullPoolSQLAlchemy(app, session_options={"autoflush": False})
 Compress(app)
+
+# CORS configuration - allows requests from localhost (for accessing Heroku-hosted API from local browser)
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "http://localhost",
+            "http://localhost:*",
+            "http://127.0.0.1",
+            "http://127.0.0.1:*"
+        ],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
