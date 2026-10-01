@@ -34,11 +34,46 @@ if ENVIRONMENT == "production":
     CORS(
         app,
         origins=["https://unpaywall.org", "https://openalex.org"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "Authorization", "X-Impersonate-User"],
         methods=["GET", "POST", "OPTIONS"]
     )
 else:
     CORS(app)
+
+USERS_API_URL = os.environ.get("USERS_API_URL", "https://user.openalex.org")
+
+# Who submitted or moderated a correction is personal data: only admins
+# (the website's moderation page) may read, filter or sort by these.
+EMAIL_FIELDS = ("submitter_email", "moderator_email")
+
+
+def get_caller():
+    """The signed-in OpenAlex user behind this request, or None.
+
+    Forwards the request's own `Authorization: Bearer <api_key>` (and an admin's
+    X-Impersonate-User) to users-api /users/me, which owns accounts. Fails
+    closed: no header, a bad key or any users-api error all mean anonymous.
+    Returns {"is_admin": bool, "emails": set of lowercased verified addresses}.
+    """
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    headers = {"Authorization": auth}
+    if impersonate := request.headers.get("X-Impersonate-User"):
+        headers["X-Impersonate-User"] = impersonate
+    try:
+        resp = requests.get(f"{USERS_API_URL}/users/me", headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return None
+        me = resp.json()
+    except Exception as e:
+        logger.error(f"Error checking caller with users-api: {e}")
+        return None
+    emails = [me.get("email")] + [e.get("email") for e in me.get("emails") or [] if e.get("verified_at")]
+    return {
+        "is_admin": bool(me.get("is_admin")),
+        "emails": {e.strip().lower() for e in emails if e},
+    }
 
 
 
@@ -133,16 +168,27 @@ def v2_corrections_post():
 
 @app.route("/v2/corrections", methods=["GET"])
 def v2_corrections_get():
-    from sqlalchemy import desc, asc
-    
+    from sqlalchemy import desc, asc, func
+
     # Pagination - support both offset and page parameters
     per_page = min(request.args.get('per_page', 20, type=int), 100)
     offset_param = request.args.get('offset', type=int)
     page = request.args.get('page', 1, type=int)
     
+    caller = get_caller()
+    is_admin = bool(caller and caller["is_admin"])
+    if not is_admin and any(request.args.get(field) for field in EMAIL_FIELDS):
+        return jsonify({"error": "Filtering by email needs an admin sign-in"}), 403
+
     # Build query with filters
     query = Curation.query
-    
+
+    # mine=true: the signed-in caller's own corrections, matched on their verified emails
+    if request.args.get('mine', '').lower() in ('true', '1', 'yes'):
+        if not caller:
+            return jsonify({"error": "mine=true needs a signed-in user (Authorization: Bearer <api_key>)"}), 401
+        query = query.filter(func.lower(Curation.submitter_email).in_(sorted(caller["emails"])))
+
     # Apply filters dynamically
     filter_fields = ['status','entity', 'entity_id', 'property', 'submitter_email', 'moderator_email', 'is_live']
     for field in filter_fields:
@@ -156,17 +202,27 @@ def v2_corrections_get():
     # Sorting
     sort_by = request.args.get('sort_by', 'submitted_date')
     sort_order = request.args.get('sort_order', 'desc')
+    if sort_by in EMAIL_FIELDS and not is_admin:
+        sort_by = 'submitted_date'
     if hasattr(Curation, sort_by):
         sort_func = desc if sort_order.lower() == 'desc' else asc
         query = query.order_by(sort_func(getattr(Curation, sort_by)))
-    
+
+    def to_dicts(curations):
+        dicts = [c.to_dict() for c in curations]
+        if not is_admin:
+            for d in dicts:
+                for field in EMAIL_FIELDS:
+                    d.pop(field, None)
+        return add_previous_values(dicts)
+
     if offset_param is not None:
         # Use offset/limit directly
         total = query.count()
         results = query.offset(offset_param).limit(per_page).all()
-        
-        return jsonify({
-            'results': add_previous_values([c.to_dict() for c in results]),
+
+        resp = jsonify({
+            'results': to_dicts(results),
             'pagination': {
                 'offset': offset_param,
                 'per_page': per_page,
@@ -177,14 +233,17 @@ def v2_corrections_get():
     else:
         # Use page-based pagination
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
-        
-        return jsonify({
-            'results': add_previous_values([c.to_dict() for c in paginated.items]),
+
+        resp = jsonify({
+            'results': to_dicts(paginated.items),
             'pagination': {
                 'page': page, 'per_page': per_page, 'total': paginated.total,
                 'pages': paginated.pages, 'has_next': paginated.has_next, 'has_prev': paginated.has_prev
             }
         })
+    # The body depends on who is asking, so no shared or browser caching
+    resp.headers['Cache-Control'] = 'private, no-store'
+    return resp
 
 
 def add_previous_values(curations):
